@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ムッツリ度診断 - 本音メーター</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --bg-0:#1c1120; --bg-1:#2b1a30; --bg-2:#3a2340;
+    --gold:#c9a24a; --gold-soft:#e3c988; --pink:#e2a9bb; --pink-deep:#c76e8b;
+    --paper:#f3e9dc; --ink:#2b1a30; --text:#f2e7ee; --text-dim:#b8a2bd; --twitter:#1d9bf0;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    min-height:100vh;
+    background:
+      radial-gradient(circle at 20% 0%, #442a4d 0%, transparent 55%),
+      radial-gradient(circle at 85% 100%, #3a1f38 0%, transparent 50%),
+      linear-gradient(180deg,var(--bg-0),var(--bg-1) 40%,var(--bg-2));
+    color:var(--text); font-family:'Zen Kaku Gothic New', sans-serif;
+    display:flex; justify-content:center; overflow-x:hidden;
+  }
+  .app{width:100%; max-width:480px; min-height:100vh; position:relative; padding:0 0 40px;}
+  .display{font-family:'Shippori Mincho', serif;}
+
+  .meter-wrap{ position:sticky; top:0; z-index:5; padding:14px 20px 10px;
+    background:linear-gradient(180deg, rgba(28,17,32,0.96), rgba(28,17,32,0.75) 80%, transparent);
+    backdrop-filter:blur(2px); }
+  .meter-label{display:flex; justify-content:space-between; align-items:baseline; font-size:12px; color:var(--text-dim); letter-spacing:.05em; margin-bottom:6px;}
+  .meter-label b{color:var(--gold-soft); font-size:13px;}
+  .meter-track{height:8px; border-radius:5px; background:rgba(255,255,255,0.08); overflow:hidden; box-shadow:inset 0 1px 3px rgba(0,0,0,.4);}
+  .meter-fill{height:100%; border-radius:5px; background:linear-gradient(90deg,var(--pink-deep),var(--gold)); transition:width .5s cubic-bezier(.4,0,.2,1);}
+
+  .screen{min-height:100vh; display:none; flex-direction:column; align-items:center; justify-content:center; padding:32px 26px; text-align:center;}
+  .screen.active{display:flex;}
+
+  #screen-intro{min-height:100vh;}
+  .envelope{ width:230px; height:150px; margin:0 auto 34px; position:relative; cursor:pointer; perspective:800px; }
+  .env-body{ position:absolute; inset:0; background:linear-gradient(160deg,#4a2a4f,#2f1b33);
+    border:1px solid rgba(230,190,140,0.35); border-radius:6px; box-shadow:0 18px 40px rgba(0,0,0,.5); }
+  .env-flap{ position:absolute; top:-1px; left:-1px; right:-1px; height:76px;
+    background:linear-gradient(160deg,#5b3260,#3a2340); clip-path:polygon(0 0,100% 0,50% 88%);
+    border-radius:6px 6px 0 0; transform-origin:top center; transition:transform .7s cubic-bezier(.6,-0.2,.3,1.4);
+    box-shadow:0 4px 10px rgba(0,0,0,.35); }
+  .envelope.open .env-flap{ transform: rotateX(178deg); }
+  .seal{ position:absolute; left:50%; top:56px; transform:translate(-50%,-50%); width:52px; height:52px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, var(--gold-soft), var(--gold) 60%, #8a6a24 100%);
+    display:flex; align-items:center; justify-content:center; font-family:'Shippori Mincho',serif; font-weight:800; color:#3a2410; font-size:13px;
+    box-shadow:0 3px 8px rgba(0,0,0,.4); z-index:2; transition:opacity .3s, transform .3s; }
+  .envelope.open .seal{ opacity:0; transform:translate(-50%,-50%) scale(.4); }
+  .letter-peek{ position:absolute; left:8px; right:8px; bottom:8px; top:38px; background:var(--paper); border-radius:3px;
+    opacity:0; transform:translateY(20px); transition:opacity .5s .3s, transform .5s .3s; }
+  .envelope.open .letter-peek{opacity:1; transform:translateY(-6px);}
+
+  .eyebrow{font-size:12px; letter-spacing:.25em; color:var(--gold-soft); margin-bottom:10px;}
+  h1.title{font-size:30px; line-height:1.4; margin:0 0 14px; font-weight:800;}
+  .sub{color:var(--text-dim); font-size:14px; line-height:1.9; margin-bottom:30px;}
+
+  .field{width:100%; margin-bottom:22px; text-align:left;}
+  .field label{display:block; font-size:12px; color:var(--text-dim); margin-bottom:8px; letter-spacing:.05em;}
+  .field input[type=text]{ width:100%; padding:14px 16px; border-radius:10px; border:1px solid rgba(230,190,140,.3);
+    background:rgba(255,255,255,0.06); color:var(--text); font-size:16px; font-family:inherit; outline:none;
+    transition:border-color .2s, background .2s; }
+  .field input[type=text]:focus{border-color:var(--gold); background:rgba(255,255,255,0.1);}
+  .field input[type=text]::placeholder{color:#7d6b82;}
+
+  .btn{ appearance:none; border:none; cursor:pointer; padding:16px 30px; border-radius:999px; font-size:16px; font-weight:700;
+    font-family:inherit; letter-spacing:.03em; background:linear-gradient(135deg,var(--gold-soft),var(--gold));
+    color:#3a2410; box-shadow:0 10px 24px rgba(201,162,74,.28); transition:transform .15s, box-shadow .15s, opacity .2s; width:100%; }
+  .btn:active{transform:scale(.97);}
+  .btn:disabled{opacity:.4; cursor:not-allowed; box-shadow:none;}
+  .btn-ghost{ background:transparent; color:var(--text-dim); box-shadow:none; border:1px solid rgba(255,255,255,.18); margin-top:12px; font-weight:500; }
+  .btn-small{width:auto; padding:9px 16px; font-size:13px;}
+  .btn-danger{background:linear-gradient(135deg,#e2a9bb,#c76e8b); color:#3a1424;}
+  .btn-twitter{ background:var(--twitter); color:#fff; box-shadow:0 10px 24px rgba(29,155,240,.35); display:flex; align-items:center; justify-content:center; gap:8px; }
+
+  #screen-quiz, #screen-age, #screen-kink{align-items:stretch; justify-content:flex-start; padding-top:6px; text-align:left;}
+  .q-count{font-size:12px; color:var(--gold-soft); letter-spacing:.1em; margin:18px 0 8px;}
+  .q-text{font-size:20px; line-height:1.6; font-weight:700; margin-bottom:22px;}
+  .options{display:flex; flex-direction:column; gap:12px;}
+  .opt{ text-align:left; padding:16px 18px; border-radius:14px; cursor:pointer; border:1px solid rgba(255,255,255,0.1);
+    background:rgba(255,255,255,0.045); font-size:15px; line-height:1.55; color:var(--text); transition:background .18s, border-color .18s, transform .12s; }
+  .opt:active{transform:scale(.985);}
+  .opt.selected{border-color:var(--gold); background:linear-gradient(135deg,rgba(201,162,74,.22),rgba(226,169,187,.14));}
+  .opt-other-box{margin-top:10px; display:none;}
+  .opt-other-box.show{display:block;}
+  .opt-other-box input{ width:100%; padding:12px 14px; border-radius:10px; border:1px solid rgba(230,190,140,.3);
+    background:rgba(255,255,255,0.07); color:var(--text); font-size:14px; font-family:inherit; outline:none; }
+  .q-next{margin-top:24px;}
+  .age-select{ width:100%; padding:16px 18px; border-radius:14px; border:1px solid rgba(230,190,140,.3);
+    background:rgba(255,255,255,0.06); color:var(--text); font-size:16px; font-family:inherit; outline:none; appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23e3c988'><path d='M7 10l5 5 5-5z'/></svg>");
+    background-repeat:no-repeat; background-position:right 16px center; background-size:20px; }
+  .age-select:focus{border-color:var(--gold);}
+  .age-select option{background:#2b1a30; color:var(--text);}
+
+  .kink-textarea{ width:100%; min-height:140px; padding:14px 16px; border-radius:12px; border:1px solid rgba(230,190,140,.3);
+    background:rgba(255,255,255,0.06); color:var(--text); font-size:15px; font-family:inherit; resize:vertical; outline:none; margin-bottom:10px; }
+  .kink-textarea:focus{border-color:var(--gold);}
+  .kink-point-preview{ font-size:12.5px; color:var(--gold-soft); margin-bottom:20px; }
+
+  #screen-result{padding-top:20px;}
+  .result-card{ width:100%; background:var(--paper); color:var(--ink); border-radius:16px; padding:34px 26px; position:relative;
+    box-shadow:0 24px 60px rgba(0,0,0,.45); opacity:0; transform:translateY(16px) scale(.98); animation:reveal .7s .15s forwards cubic-bezier(.2,.8,.3,1); }
+  @keyframes reveal{ to{opacity:1; transform:translateY(0) scale(1);} }
+  .result-eyebrow{font-size:11px; letter-spacing:.2em; color:var(--pink-deep); font-weight:700; margin-bottom:10px;}
+  .result-type{font-family:'Shippori Mincho',serif; font-size:26px; font-weight:800; margin:0 0 14px; line-height:1.5;}
+  .result-score{font-size:13px; color:#6b5a70; margin-bottom:18px;}
+  .result-desc{font-size:14.5px; line-height:1.95; color:#3a2b3e; white-space:pre-line;}
+  .result-wax{ position:absolute; top:-22px; right:22px; width:56px; height:56px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, var(--pink), var(--pink-deep) 70%); box-shadow:0 6px 14px rgba(0,0,0,.35);
+    display:flex; align-items:center; justify-content:center; font-family:'Shippori Mincho',serif; color:#3a1424; font-weight:800; font-size:12px; }
+  .result-actions{width:100%; margin-top:26px; display:flex; flex-direction:column; gap:12px;}
+  .saved-note{font-size:11.5px; color:var(--text-dim); margin-top:14px; line-height:1.7;}
+
+  #screen-admin{align-items:stretch; text-align:left; padding-top:20px;}
+  #screen-admin h2{font-family:'Shippori Mincho',serif; font-size:20px; margin-bottom:14px;}
+  .tabs{display:flex; gap:6px; margin-bottom:18px; flex-wrap:wrap;}
+  .tab-btn{ flex:1 1 40%; padding:10px 6px; border-radius:10px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.04);
+    color:var(--text-dim); font-family:inherit; font-size:12.5px; cursor:pointer; }
+  .tab-btn.active{ background:linear-gradient(135deg,var(--gold-soft),var(--gold)); color:#3a2410; font-weight:700; border-color:transparent; }
+  .tab-panel{display:none;}
+  .tab-panel.active{display:block;}
+  .admin-row{border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:12px 14px; margin-bottom:10px; font-size:13px; line-height:1.7;}
+  .admin-row b{color:var(--gold-soft);}
+  .admin-toolbar{display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;}
+
+  .qedit-card{ border:1px solid rgba(255,255,255,.15); border-radius:12px; padding:16px; margin-bottom:16px; background:rgba(255,255,255,.03); }
+  .qedit-card textarea{ width:100%; min-height:54px; padding:10px 12px; border-radius:8px; border:1px solid rgba(230,190,140,.3);
+    background:rgba(255,255,255,0.06); color:var(--text); font-size:14px; font-family:inherit; resize:vertical; margin-bottom:10px; }
+  .opt-row{display:flex; gap:8px; margin-bottom:8px; align-items:center;}
+  .opt-row input[type=text]{ flex:1; padding:9px 10px; border-radius:8px; border:1px solid rgba(230,190,140,.3);
+    background:rgba(255,255,255,0.06); color:var(--text); font-size:13px; font-family:inherit; }
+  .opt-row input[type=number]{ width:58px; padding:9px 6px; border-radius:8px; border:1px solid rgba(230,190,140,.3);
+    background:rgba(255,255,255,0.06); color:var(--text); font-size:13px; text-align:center; font-family:inherit; }
+  .opt-row button{ background:none; border:none; color:var(--pink); font-size:18px; cursor:pointer; padding:0 4px; }
+  .qedit-foot{display:flex; justify-content:space-between; align-items:center; margin-top:10px; flex-wrap:wrap; gap:8px;}
+  .other-toggle{font-size:12.5px; color:var(--text-dim); display:flex; align-items:center; gap:6px;}
+  .add-opt-btn{ background:none; border:1px dashed rgba(230,190,140,.4); color:var(--gold-soft); border-radius:8px; padding:6px 10px; font-size:12.5px; cursor:pointer; font-family:inherit; }
+  .del-q-btn{ background:none; border:none; color:var(--pink-deep); font-size:12.5px; cursor:pointer; text-decoration:underline; font-family:inherit; }
+  .editor-toast{ font-size:13px; padding:10px 14px; border-radius:8px; margin-bottom:14px; display:none; }
+  .editor-toast.show{display:block;}
+  .editor-toast.ok{background:rgba(201,162,74,.18); color:var(--gold-soft);}
+  .editor-toast.err{background:rgba(226,169,187,.18); color:var(--pink);}
+
+  .site-field{margin-bottom:16px;}
+  .site-field label{display:block; font-size:12.5px; color:var(--text-dim); margin-bottom:6px;}
+  .site-field input[type=text], .site-field input[type=number], .site-field textarea{
+    width:100%; padding:10px 12px; border-radius:8px; border:1px solid rgba(230,190,140,.3);
+    background:rgba(255,255,255,0.06); color:var(--text); font-size:13.5px; font-family:inherit; }
+  .site-field textarea{min-height:70px; resize:vertical;}
+  .site-hint{font-size:11.5px; color:#8a7690; margin-top:5px; line-height:1.6;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="meter-wrap" id="meterWrap" style="display:none;">
+    <div class="meter-label"><span>本音メーター</span><b id="meterPct">0%</b></div>
+    <div class="meter-track"><div class="meter-fill" id="meterFill" style="width:0%"></div></div>
+  </div>
+
+  <section class="screen active" id="screen-intro">
+    <div class="envelope" id="envelope">
+      <div class="env-body"></div>
+      <div class="env-flap"></div>
+      <div class="seal">秘密</div>
+      <div class="letter-peek"></div>
+    </div>
+    <div class="eyebrow">SECRET DIAGNOSIS</div>
+    <h1 class="title">エロ度診断</h1>
+    <p class="sub">誰にも言えない本音、指先だけで暴いてみませんか。<br>タップで答えるだけ、約2分。</p>
+    <div class="field">
+      <label for="nickname">ニックネーム</label>
+      <input type="text" id="nickname" placeholder="例:あんず" maxlength="20">
+    </div>
+    <button class="btn" id="startBtn" disabled>封を切って診断をはじめる</button>
+  </section>
+
+  <section class="screen" id="screen-age">
+    <div class="q-count">STEP 0</div>
+    <div class="q-text">年齢を教えてください</div>
+    <select class="age-select" id="ageSelect">
+      <option value="" selected disabled>選択してください</option>
+    </select>
+    <button class="btn q-next" id="ageNextBtn" disabled>質問へ進む</button>
+  </section>
+
+  <section class="screen" id="screen-quiz">
+    <div class="q-count" id="qCount"></div>
+    <div class="q-text" id="qText"></div>
+    <div class="options" id="qOptions"></div>
+  </section>
+
+  <section class="screen" id="screen-kink">
+    <div class="q-count">LAST QUESTION</div>
+    <div class="q-text" id="kinkLabel"></div>
+    <textarea class="kink-textarea" id="kinkInput" maxlength="500"></textarea>
+    <div class="kink-point-preview" id="kinkPreview">0 pt</div>
+    <button class="btn q-next" id="kinkFinishBtn">診断結果を見る</button>
+  </section>
+
+  <section class="screen" id="screen-result">
+    <div class="result-card">
+      <div class="result-wax">封</div>
+      <div class="result-eyebrow">DIAGNOSIS RESULT</div>
+      <h2 class="result-type" id="rType"></h2>
+      <div class="result-score" id="rScore"></div>
+      <div class="result-desc" id="rDesc"></div>
+    </div>
+    <div class="result-actions">
+      <button class="btn btn-twitter" id="tweetBtn">𝕏でシェアする</button>
+      <button class="btn" id="retryBtn">もう一度診断する</button>
+    </div>
+    <div class="saved-note">回答は開発者が今後の改善のために保存します。個人を特定する情報(氏名・連絡先など)は入力しないでください。</div>
+  </section>
+
+  <section class="screen" id="screen-admin">
+    <h2>管理画面</h2>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="responses">回答一覧</button>
+      <button class="tab-btn" data-tab="editor">質問編集</button>
+      <button class="tab-btn" data-tab="results">結果編集</button>
+      <button class="tab-btn" data-tab="site">サイト設定</button>
+    </div>
+
+    <div class="tab-panel active" id="panel-responses">
+      <div class="admin-toolbar">
+        <button class="btn btn-small" id="adminReload">再読込</button>
+        <button class="btn btn-small" id="adminExport">CSV書き出し</button>
+      </div>
+      <div id="adminList"></div>
+    </div>
+
+    <div class="tab-panel" id="panel-editor">
+      <div class="editor-toast" id="editorToast"></div>
+      <div class="admin-toolbar">
+        <button class="btn btn-small" id="addQBtn">＋ 質問を追加</button>
+        <button class="btn btn-small" id="saveQBtn">保存する</button>
+        <button class="btn btn-small btn-danger" id="resetQBtn">初期状態に戻す</button>
+      </div>
+      <div id="qEditorList"></div>
+    </div>
+
+    <div class="tab-panel" id="panel-results">
+      <div class="editor-toast" id="resultsToast"></div>
+      <div class="admin-toolbar">
+        <button class="btn btn-small" id="addResultBtn">＋ 結果タイプを追加</button>
+        <button class="btn btn-small" id="saveResultBtn">保存する</button>
+        <button class="btn btn-small btn-danger" id="resetResultBtn">初期状態に戻す</button>
+      </div>
+      <div class="site-hint" style="margin-bottom:14px;">「上限%」は本音スコアの割合(0〜100)です。数値が小さい順に並べ、その質問のスコア割合が上限%以下だとそのタイプになります。一番大きいものが最終ランクです。</div>
+      <div id="resultEditorList"></div>
+    </div>
+
+    <div class="tab-panel" id="panel-site">
+      <div class="editor-toast" id="siteToast"></div>
+      <div class="site-field">
+        <label>性癖回答欄:質問文</label>
+        <input type="text" id="kinkLabelInput">
+      </div>
+      <div class="site-field">
+        <label>性癖回答欄:1ポイントに必要な文字数</label>
+        <input type="number" id="kinkCharsInput" min="1">
+      </div>
+      <div class="site-field">
+        <label>性癖回答欄:最大ポイント</label>
+        <input type="number" id="kinkMaxInput" min="0">
+      </div>
+      <div class="site-field">
+        <label>Xシェア用ハッシュタグ(カンマ区切り、#不要)</label>
+        <input type="text" id="hashtagsInput">
+      </div>
+      <div class="site-field">
+        <label>Xシェア文言(使える変数:{nickname} {type} {score} {max})</label>
+        <textarea id="tweetTemplateInput"></textarea>
+        <div class="site-hint">例:私は「{type}」でした!(本音スコア {score}/{max})</div>
+      </div>
+      <div class="admin-toolbar">
+        <button class="btn btn-small" id="saveSiteBtn">保存する</button>
+        <button class="btn btn-small btn-danger" id="resetSiteBtn">初期状態に戻す</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function(){
+
+  // 管理画面に入るための合言葉(URLの ?key= の値と一致させる)
+  const ADMIN_TOKEN = "8fQ3mZk7Lp2xRaN0wYtEigCd9bVhJs4u";
+
+  // ▼▼▼ ここにFirebaseコンソールで取得した設定を貼り付けてください ▼▼▼
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyAgbkjUKkwn2GvisbtHEf9fZOkER8eiX0o",
+    authDomain: "hdosindan.firebaseapp.com",
+    projectId: "hdosindan",
+    storageBucket: "hdosindan.firebasestorage.app",
+    messagingSenderId: "438547567713",
+    appId: "1:438547567713:web:2c5b7b1974d9259cc90620"
+  };
+  // ▲▲▲ ここまで ▲▲▲
+
+  firebase.initializeApp(FIREBASE_CONFIG);
+  const db = firebase.firestore();
+
+  function buildAgeOptions(){
+    const list = ["10歳以下"];
+    for(let i=11;i<=59;i++) list.push(String(i)+"歳");
+    list.push("60歳以上");
+    return list;
+  }
+  const AGE_OPTIONS = buildAgeOptions();
+
+  const DEFAULT_QUESTIONS = [
+    { q:"電車で好みのタイプの人が向かいに座った。あなたは?",
+      opts:[
+        {t:"気配を消してガン見できる位置を確保する", p:3},
+        {t:"チラチラ見てしまう", p:2},
+        {t:"存在に気づく程度", p:1},
+        {t:"全く気にならない", p:0},
+      ], other:false},
+    { q:"恋愛ドラマや映画のキスシーン、あなたの反応は?",
+      opts:[
+        {t:"息を止めて画面に集中する", p:3},
+        {t:"思わずニヤけてしまう", p:2},
+        {t:"「お、きたな」くらいの温度感", p:1},
+        {t:"特に何も感じない", p:0},
+      ], other:false},
+    { q:"友達の惚気(のろけ)話を聞いた時",
+      opts:[
+        {t:"根掘り葉掘り詳細を聞き出す", p:3},
+        {t:"話を勝手に膨らませて妄想する", p:2},
+        {t:"適当に相槌を打つ", p:1},
+        {t:"早く終われと思う", p:0},
+      ], other:true},
+    { q:"気になる人からの何気ないLINE、何回読み返す?",
+      opts:[
+        {t:"5回以上読み返して行間まで分析する", p:3},
+        {t:"2〜3回は読み返す", p:2},
+        {t:"一度読んだら満足", p:1},
+        {t:"読み返す習慣がない", p:0},
+      ], other:false},
+    { q:"香水や匂いに関して、当てはまるのは?",
+      opts:[
+        {t:"好きな人の匂いを覚えている自信がある", p:3},
+        {t:"いい匂いだと少しドキッとする", p:2},
+        {t:"匂いはあまり気にしない", p:1},
+        {t:"匂いより見た目や声を気にする", p:0},
+      ], other:false},
+    { q:"妄想スイッチが入りやすいのはどんな時?",
+      opts:[
+        {t:"ふとした瞬間に無限に妄想が広がる", p:3},
+        {t:"特定のシチュエーションで妄想する", p:2},
+        {t:"あまり妄想はしない方", p:1},
+        {t:"妄想より現実思考", p:0},
+      ], other:true},
+    { q:"カラオケでラブソングを歌う時のテンションは?",
+      opts:[
+        {t:"感情移入して歌詞に酔いしれる", p:3},
+        {t:"ちょっと照れながら楽しむ", p:2},
+        {t:"普通に歌う", p:1},
+        {t:"ラブソングはあまり選ばない", p:0},
+      ], other:false},
+    { q:"マッチングアプリや恋愛占いを見る頻度は?",
+      opts:[
+        {t:"暇さえあればチェックしてしまう", p:3},
+        {t:"たまに気になって見る", p:2},
+        {t:"ほとんど見ない", p:1},
+        {t:"全く興味がない", p:0},
+      ], other:false},
+    { q:"好きな人のふとした仕草にドキッとする頻度は?",
+      opts:[
+        {t:"些細な仕草にも敏感に反応する", p:3},
+        {t:"たまにドキッとする", p:2},
+        {t:"あまり反応しない", p:1},
+        {t:"全然気づかない", p:0},
+      ], other:false},
+    { q:"恋愛小説や漫画のときめきシーン、読み方は?",
+      opts:[
+        {t:"同じシーンを何度も読み返す", p:3},
+        {t:"じっくり味わって読む", p:2},
+        {t:"サラッと読み進める", p:1},
+        {t:"あまり読まない", p:0},
+      ], other:true},
+    { q:"気になる人とのLINEの既読・返信スピード、気になる?",
+      opts:[
+        {t:"秒単位でめちゃくちゃ気になる", p:3},
+        {t:"少し気になってしまう", p:2},
+        {t:"あまり気にしない", p:1},
+        {t:"全く気にならない", p:0},
+      ], other:false},
+    { q:"理想のデートプランを妄想したことは?",
+      opts:[
+        {t:"事細かに脳内シミュレーションを何パターンも用意する", p:3},
+        {t:"なんとなく妄想したことはある", p:2},
+        {t:"あまり考えたことはない", p:1},
+        {t:"妄想より実際に会って決める派", p:0},
+      ], other:false},
+    { q:"「本音を聞かせて」と言われた時の反応は?",
+      opts:[
+        {t:"内心ドキッとしつつ本音がダダ漏れる", p:3},
+        {t:"少し照れながら本音を話す", p:2},
+        {t:"サラッと軽く流す", p:1},
+        {t:"本音はあまり見せない", p:0},
+      ], other:false},
+  ];
+
+  const DEFAULT_RESULTS = [
+    { max:25, type:"純情タイプ", desc:"まっすぐで清らかな心の持ち主。\n恋愛的な妄想よりも、目の前のことに集中する堅実さがあなたの魅力です。\nムッツリ要素はほぼ検出されませんでした。" },
+    { max:50, type:"ほのかにムッツリタイプ", desc:"普段は落ち着いているけれど、ふとした瞬間に乙女(乙男)心が疼くタイプ。\n本人も気づかないくらいの、絶妙なさじ加減の本音を秘めています。" },
+    { max:75, type:"隠れムッツリタイプ", desc:"表面はクールなのに、内心はかなりの妄想派。\n周りは気づいていないかもしれませんが、頭の中では意外とドラマが展開されている様子。" },
+    { max:100, type:"筋金入りムッツリタイプ", desc:"誰もが認める本格派。\n些細なきっかけで一瞬にして妄想スイッチが入り、脳内は常に恋愛モード全開。\nそれもあなたの人間らしい魅力のひとつです。" },
+  ];
+
+  const DEFAULT_SITE = {
+    kinkLabel: "最後に、誰にも言えない性癖や妄想があれば教えてください(自由記述・書いた文字数に応じてポイントが加算されます)",
+    kinkCharsPerPoint: 5,
+    kinkMaxPoints: 10,
+    hashtags: "ムッツリ度診断",
+    tweetTemplate: "私は「{type}」でした!(本音スコア {score}/{max}) #診断"
+  };
+
+  function cloneObj(o){ return JSON.parse(JSON.stringify(o)); }
+  function computeQuestionsMax(qs){
+    return qs.reduce((sum,q)=>{
+      const optMax = q.opts.length ? Math.max(...q.opts.map(o=>Number(o.p)||0)) : 0;
+      const otherMax = q.other ? 1 : 0;
+      return sum + Math.max(optMax, otherMax);
+    }, 0);
+  }
+
+  let activeQuestions = cloneObj(DEFAULT_QUESTIONS);
+  let resultBands = cloneObj(DEFAULT_RESULTS);
+  let siteConfig = cloneObj(DEFAULT_SITE);
+  let MAX_SCORE = computeQuestionsMax(activeQuestions) + siteConfig.kinkMaxPoints;
+
+  async function loadConfigs(){
+    try{
+      const s1 = await db.collection('app_config').doc('questions').get();
+      if(s1.exists){ const p = s1.data().list; if(Array.isArray(p) && p.length>0) activeQuestions = p; }
+    }catch(e){ console.error('質問設定の読み込みに失敗', e); }
+    try{
+      const s2 = await db.collection('app_config').doc('results').get();
+      if(s2.exists){ const p = s2.data().list; if(Array.isArray(p) && p.length>0) resultBands = p; }
+    }catch(e){ console.error('結果設定の読み込みに失敗', e); }
+    try{
+      const s3 = await db.collection('app_config').doc('site').get();
+      if(s3.exists){ siteConfig = Object.assign({}, DEFAULT_SITE, s3.data()); }
+    }catch(e){ console.error('サイト設定の読み込みに失敗', e); }
+    MAX_SCORE = computeQuestionsMax(activeQuestions) + (Number(siteConfig.kinkMaxPoints)||0);
+  }
+
+  // ---------------- 状態 ----------------
+  let nickname = ""; let age = ""; let current = 0; let answers = []; let selectedIndex = null;
+
+  const $ = (id) => document.getElementById(id);
+  const screens = { intro:$('screen-intro'), age:$('screen-age'), quiz:$('screen-quiz'), kink:$('screen-kink'), result:$('screen-result'), admin:$('screen-admin') };
+  function showScreen(name){
+    Object.values(screens).forEach(s=>s.classList.remove('active'));
+    screens[name].classList.add('active');
+    $('meterWrap').style.display = (name==='quiz') ? 'block' : 'none';
+  }
+
+  const envelope = $('envelope'); const nicknameInput = $('nickname'); const startBtn = $('startBtn');
+  envelope.addEventListener('click', ()=> envelope.classList.add('open'));
+  nicknameInput.addEventListener('input', ()=>{ startBtn.disabled = nicknameInput.value.trim().length === 0; });
+  startBtn.addEventListener('click', ()=>{
+    nickname = nicknameInput.value.trim() || "名無し";
+    showScreen('age');
+    renderAgeOptions();
+  });
+
+  function renderAgeOptions(){
+    age = "";
+    $('ageNextBtn').disabled = true;
+    const sel = $('ageSelect');
+    sel.innerHTML = '<option value="" selected disabled>選択してください</option>';
+    AGE_OPTIONS.forEach(label=>{
+      const opt = document.createElement('option');
+      opt.value = label; opt.textContent = label;
+      sel.appendChild(opt);
+    });
+    sel.value = "";
+  }
+  $('ageSelect').addEventListener('change', (e)=>{
+    age = e.target.value;
+    $('ageNextBtn').disabled = !age;
+  });
+  $('ageNextBtn').addEventListener('click', ()=>{
+    current = 0; answers = [];
+    showScreen('quiz');
+    renderQuestion();
+  });
+
+  function updateMeter(){
+    const sum = answers.reduce((a,b)=>a+b.points,0);
+    const pct = MAX_SCORE>0 ? Math.min(100, Math.round((sum/MAX_SCORE)*100)) : 0;
+    $('meterFill').style.width = pct + '%';
+    $('meterPct').textContent = pct + '%';
+  }
+
+  function renderQuestion(){
+    selectedIndex = null;
+    const q = activeQuestions[current];
+    $('qCount').textContent = `Q${current+1} / ${activeQuestions.length}`;
+    $('qText').textContent = q.q;
+    const wrap = $('qOptions'); wrap.innerHTML = '';
+
+    const allOpts = q.opts.map(o=>({t:o.t, p:Number(o.p)||0, isOther:false}));
+    if(q.other) allOpts.push({t:"その他", p:1, isOther:true});
+
+    allOpts.forEach((opt, idx)=>{
+      const div = document.createElement('div');
+      div.className = 'opt';
+      div.textContent = opt.t;
+      div.addEventListener('click', ()=> selectOption(idx, allOpts, div, wrap));
+      wrap.appendChild(div);
+      if(opt.isOther){
+        const box = document.createElement('div');
+        box.className = 'opt-other-box'; box.id = 'otherBox';
+        box.innerHTML = `<input type="text" id="otherInput" placeholder="よければ具体的に教えてください" maxlength="60">`;
+        wrap.appendChild(box);
+      }
+    });
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'btn q-next'; nextBtn.id = 'nextBtn';
+    nextBtn.textContent = (current === activeQuestions.length-1) ? '最後の質問へ' : '次の質問へ';
+    nextBtn.disabled = true;
+    nextBtn.addEventListener('click', goNext);
+    wrap.appendChild(nextBtn);
+    updateMeter();
+  }
+
+  function selectOption(idx, allOpts, el, wrap){
+    wrap.querySelectorAll('.opt').forEach(o=>o.classList.remove('selected'));
+    el.classList.add('selected');
+    selectedIndex = idx;
+    const opt = allOpts[idx];
+    const otherBox = $('otherBox');
+    if(otherBox){
+      if(opt.isOther){ otherBox.classList.add('show'); setTimeout(()=>{ const inp=$('otherInput'); if(inp) inp.focus(); }, 50); }
+      else{ otherBox.classList.remove('show'); }
+    }
+    $('nextBtn').disabled = false;
+  }
+
+  function goNext(){
+    const q = activeQuestions[current];
+    const allOpts = q.opts.map(o=>({t:o.t,p:Number(o.p)||0,isOther:false}));
+    if(q.other) allOpts.push({t:"その他", p:1, isOther:true});
+    const chosen = allOpts[selectedIndex];
+    let choiceText = chosen.t; let otherVal = "";
+    if(chosen.isOther){
+      const inp = $('otherInput'); otherVal = inp ? inp.value.trim() : "";
+      if(otherVal) choiceText = `その他:${otherVal}`;
+    }
+    answers.push({ question:q.q, choice:choiceText, points:chosen.p, otherText:otherVal });
+    if(current < activeQuestions.length-1){ current++; renderQuestion(); }
+    else{ showKinkScreen(); }
+  }
+
+  // ---------------- 性癖回答欄 ----------------
+  function kinkPoints(text){
+    const cpp = Number(siteConfig.kinkCharsPerPoint) || 5;
+    const maxP = Number(siteConfig.kinkMaxPoints) || 0;
+    const len = text.trim().length;
+    return Math.max(0, Math.min(maxP, Math.floor(len / cpp)));
+  }
+  function showKinkScreen(){
+    $('kinkLabel').textContent = siteConfig.kinkLabel;
+    $('kinkInput').value = '';
+    $('kinkPreview').textContent = `0 pt (最大 ${siteConfig.kinkMaxPoints} pt)`;
+    showScreen('kink');
+  }
+  $('kinkInput').addEventListener('input', (e)=>{
+    const pts = kinkPoints(e.target.value);
+    $('kinkPreview').textContent = `${pts} pt (最大 ${siteConfig.kinkMaxPoints} pt)`;
+  });
+  $('kinkFinishBtn').addEventListener('click', ()=>{
+    const text = $('kinkInput').value.trim();
+    const pts = kinkPoints(text);
+    answers.push({ question: siteConfig.kinkLabel, choice: text || "(未回答)", points: pts, otherText: text });
+    finishQuiz();
+  });
+
+  let lastResult = null;
+  function finishQuiz(){
+    const total = answers.reduce((a,b)=>a+b.points,0);
+    const ratioPct = MAX_SCORE>0 ? (total/MAX_SCORE)*100 : 0;
+    const sorted = cloneObj(resultBands).sort((a,b)=>a.max-b.max);
+    const result = sorted.find(r=> ratioPct <= r.max) || sorted[sorted.length-1];
+    lastResult = { total, result };
+    $('rType').textContent = result.type;
+    $('rScore').textContent = `本音スコア ${total} / ${MAX_SCORE}`;
+    $('rDesc').textContent = result.desc;
+    showScreen('result');
+    saveResponse(total, result.type);
+  }
+
+  async function saveResponse(total, resultType){
+    const payload = { nickname, age, answers, totalScore: total, resultType, timestamp: new Date().toISOString() };
+    try{ await db.collection('responses').add(payload); }
+    catch(e){ console.error('保存に失敗しました', e); }
+  }
+
+  $('tweetBtn').addEventListener('click', ()=>{
+    if(!lastResult) return;
+    const tpl = siteConfig.tweetTemplate || DEFAULT_SITE.tweetTemplate;
+    const text = tpl
+      .replace(/\{nickname\}/g, nickname)
+      .replace(/\{type\}/g, lastResult.result.type)
+      .replace(/\{score\}/g, lastResult.total)
+      .replace(/\{max\}/g, MAX_SCORE);
+    const hashtags = (siteConfig.hashtags || '').split(/[,、\s]+/).filter(Boolean).join(',');
+    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&hashtags=${encodeURIComponent(hashtags)}`;
+    window.open(url, '_blank');
+  });
+
+  $('retryBtn').addEventListener('click', ()=>{
+    nicknameInput.value = ''; startBtn.disabled = true; envelope.classList.remove('open');
+    showScreen('intro');
+  });
+
+  // ---------------- 管理者：回答一覧 ----------------
+  let adminData = [];
+  async function loadAdminResponses(){
+    const listEl = $('adminList');
+    listEl.innerHTML = '<p style="color:#b8a2bd;">読み込み中...</p>';
+    try{
+      const snap = await db.collection('responses').orderBy('timestamp','desc').get();
+      adminData = [];
+      snap.forEach(doc=> adminData.push(doc.data()));
+      if(adminData.length===0){ listEl.innerHTML = '<p style="color:#b8a2bd;">まだ回答がありません。</p>'; return; }
+      listEl.innerHTML = adminData.map(d=>{
+        const answersHtml = d.answers.map((a,i)=>`${i+1}. ${esc(a.question)}<br>→ ${esc(a.choice)} (${a.points}pt)`).join('<br><br>');
+        return `<div class="admin-row"><b>${esc(d.nickname)}</b>(${esc(d.age||'年齢未回答')}) ・ ${esc(d.resultType)} ・ ${d.totalScore}pt ・ ${new Date(d.timestamp).toLocaleString('ja-JP')}<br><br>${answersHtml}</div>`;
+      }).join('');
+    }catch(e){ console.error(e); listEl.innerHTML = '<p style="color:#e2a9bb;">読み込みに失敗しました。(Firestoreの設定・ルールをご確認ください)</p>'; }
+  }
+  function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+
+  $('adminReload').addEventListener('click', loadAdminResponses);
+  $('adminExport').addEventListener('click', ()=>{
+    if(adminData.length===0) return;
+    const maxQ = Math.max(...adminData.map(d=>d.answers.length));
+    const header = ['nickname','age','totalScore','resultType','timestamp'];
+    for(let i=1;i<=maxQ;i++) header.push(`Q${i}_question`, `Q${i}_choice`, `Q${i}_points`);
+    const rows = adminData.map(d=>{
+      const row = [d.nickname, d.age||'', d.totalScore, d.resultType, d.timestamp];
+      for(let i=0;i<maxQ;i++){ const a = d.answers[i]; row.push(a? a.question:'', a? a.choice:'', a? a.points:''); }
+      return row;
+    });
+    const csv = [header, ...rows].map(r=> r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob(["\uFEFF"+csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'muttsuri_responses.csv'; a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  // ---------------- 管理者：質問エディタ ----------------
+  let editQuestions = [];
+  function renderEditor(){
+    const wrap = $('qEditorList'); wrap.innerHTML = '';
+    editQuestions.forEach((q, qi)=>{
+      const card = document.createElement('div'); card.className = 'qedit-card';
+      const ta = document.createElement('textarea');
+      ta.placeholder = '質問文を入力'; ta.value = q.q;
+      ta.addEventListener('input', ()=> q.q = ta.value);
+      card.appendChild(ta);
+
+      const optsWrap = document.createElement('div');
+      q.opts.forEach((opt, oi)=>{
+        const row = document.createElement('div'); row.className = 'opt-row';
+        const tIn = document.createElement('input');
+        tIn.type = 'text'; tIn.placeholder = `選択肢${oi+1}`; tIn.value = opt.t;
+        tIn.addEventListener('input', ()=> opt.t = tIn.value);
+        const pIn = document.createElement('input');
+        pIn.type = 'number'; pIn.value = opt.p; pIn.min = 0; pIn.max = 20;
+        pIn.addEventListener('input', ()=> opt.p = Number(pIn.value));
+        const rmBtn = document.createElement('button'); rmBtn.textContent = '✕'; rmBtn.title = '選択肢を削除';
+        rmBtn.addEventListener('click', ()=>{
+          if(q.opts.length <= 2){ showToast('editorToast','選択肢は最低2つ必要です', false); return; }
+          q.opts.splice(oi,1); renderEditor();
+        });
+        row.appendChild(tIn); row.appendChild(pIn); row.appendChild(rmBtn);
+        optsWrap.appendChild(row);
+      });
+      card.appendChild(optsWrap);
+
+      const addOptBtn = document.createElement('button');
+      addOptBtn.className = 'add-opt-btn'; addOptBtn.textContent = '＋ 選択肢を追加';
+      addOptBtn.addEventListener('click', ()=>{ q.opts.push({t:'', p:0}); renderEditor(); });
+      card.appendChild(addOptBtn);
+
+      const foot = document.createElement('div'); foot.className = 'qedit-foot';
+      const otherLabel = document.createElement('label'); otherLabel.className = 'other-toggle';
+      const otherCheck = document.createElement('input');
+      otherCheck.type = 'checkbox'; otherCheck.checked = !!q.other;
+      otherCheck.addEventListener('change', ()=> q.other = otherCheck.checked);
+      otherLabel.appendChild(otherCheck);
+      otherLabel.appendChild(document.createTextNode('「その他」(自由記述・1pt)を追加する'));
+      foot.appendChild(otherLabel);
+
+      const delQBtn = document.createElement('button');
+      delQBtn.className = 'del-q-btn'; delQBtn.textContent = 'この質問を削除';
+      delQBtn.addEventListener('click', ()=>{
+        if(editQuestions.length <= 1){ showToast('editorToast','質問は最低1つ必要です', false); return; }
+        if(confirm('この質問を削除しますか?')){ editQuestions.splice(qi,1); renderEditor(); }
+      });
+      foot.appendChild(delQBtn);
+      card.appendChild(foot);
+      wrap.appendChild(card);
+    });
+  }
+  function showToast(id, msg, ok){
+    const t = $(id); t.textContent = msg;
+    t.className = 'editor-toast show ' + (ok ? 'ok':'err');
+    setTimeout(()=> t.classList.remove('show'), 3500);
+  }
+  $('addQBtn').addEventListener('click', ()=>{ editQuestions.push({ q:'', opts:[{t:'',p:0},{t:'',p:1}], other:false }); renderEditor(); });
+  $('saveQBtn').addEventListener('click', async ()=>{
+    for(const q of editQuestions){
+      if(!q.q.trim()){ showToast('editorToast','空の質問文があります', false); return; }
+      if(q.opts.length < 2){ showToast('editorToast','各質問には選択肢が2つ以上必要です', false); return; }
+      for(const o of q.opts){ if(!o.t.trim()){ showToast('editorToast','空の選択肢があります', false); return; } }
+    }
+    try{
+      await db.collection('app_config').doc('questions').set({list: editQuestions});
+      activeQuestions = cloneObj(editQuestions);
+      MAX_SCORE = computeQuestionsMax(activeQuestions) + (Number(siteConfig.kinkMaxPoints)||0);
+      showToast('editorToast','保存しました。診断に反映されます。', true);
+    }catch(e){ showToast('editorToast','保存に失敗しました', false); }
+  });
+  $('resetQBtn').addEventListener('click', async ()=>{
+    if(!confirm('初期状態の質問セットに戻しますか?')) return;
+    editQuestions = cloneObj(DEFAULT_QUESTIONS);
+    try{ await db.collection('app_config').doc('questions').set({list: editQuestions}); }catch(e){}
+    activeQuestions = cloneObj(DEFAULT_QUESTIONS);
+    MAX_SCORE = computeQuestionsMax(activeQuestions) + (Number(siteConfig.kinkMaxPoints)||0);
+    renderEditor();
+    showToast('editorToast','初期状態に戻しました。', true);
+  });
+
+  // ---------------- 管理者：結果エディタ ----------------
+  let editResults = [];
+  function renderResultEditor(){
+    const wrap = $('resultEditorList'); wrap.innerHTML = '';
+    editResults.forEach((r, ri)=>{
+      const card = document.createElement('div'); card.className = 'qedit-card';
+      const row1 = document.createElement('div'); row1.className = 'opt-row';
+      const maxIn = document.createElement('input');
+      maxIn.type = 'number'; maxIn.min = 1; maxIn.max = 100; maxIn.value = r.max; maxIn.style.width='70px';
+      maxIn.addEventListener('input', ()=> r.max = Number(maxIn.value));
+      const maxLbl = document.createElement('span'); maxLbl.style.fontSize='12.5px'; maxLbl.style.color='var(--text-dim)'; maxLbl.textContent = ' % 以下';
+      row1.appendChild(maxIn); row1.appendChild(maxLbl);
+      card.appendChild(row1);
+
+      const typeIn = document.createElement('input');
+      typeIn.type = 'text'; typeIn.placeholder = 'タイプ名'; typeIn.value = r.type; typeIn.style.marginTop='10px'; typeIn.style.marginBottom='10px';
+      typeIn.style.width='100%'; typeIn.style.padding='9px 10px'; typeIn.style.borderRadius='8px';
+      typeIn.style.border='1px solid rgba(230,190,140,.3)'; typeIn.style.background='rgba(255,255,255,0.06)'; typeIn.style.color='var(--text)'; typeIn.style.fontFamily='inherit';
+      typeIn.addEventListener('input', ()=> r.type = typeIn.value);
+      card.appendChild(typeIn);
+
+      const descTa = document.createElement('textarea');
+      descTa.placeholder = '結果の説明文'; descTa.value = r.desc; descTa.style.minHeight='90px';
+      descTa.addEventListener('input', ()=> r.desc = descTa.value);
+      card.appendChild(descTa);
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'del-q-btn'; delBtn.textContent = 'このタイプを削除';
+      delBtn.style.marginTop='10px';
+      delBtn.addEventListener('click', ()=>{
+        if(editResults.length <= 2){ showToast('resultsToast','結果タイプは最低2つ必要です', false); return; }
+        if(confirm('このタイプを削除しますか?')){ editResults.splice(ri,1); renderResultEditor(); }
+      });
+      card.appendChild(delBtn);
+      wrap.appendChild(card);
+    });
+  }
+  $('addResultBtn').addEventListener('click', ()=>{
+    editResults.push({ max:100, type:'新しいタイプ', desc:'' });
+    renderResultEditor();
+  });
+  $('saveResultBtn').addEventListener('click', async ()=>{
+    for(const r of editResults){
+      if(!r.type.trim()){ showToast('resultsToast','空のタイプ名があります', false); return; }
+      if(!r.max || r.max<=0){ showToast('resultsToast','上限%は1以上で設定してください', false); return; }
+    }
+    try{
+      await db.collection('app_config').doc('results').set({list: editResults});
+      resultBands = cloneObj(editResults);
+      showToast('resultsToast','保存しました。診断に反映されます。', true);
+    }catch(e){ showToast('resultsToast','保存に失敗しました', false); }
+  });
+  $('resetResultBtn').addEventListener('click', async ()=>{
+    if(!confirm('初期状態の結果セットに戻しますか?')) return;
+    editResults = cloneObj(DEFAULT_RESULTS);
+    try{ await db.collection('app_config').doc('results').set({list: editResults}); }catch(e){}
+    resultBands = cloneObj(DEFAULT_RESULTS);
+    renderResultEditor();
+    showToast('resultsToast','初期状態に戻しました。', true);
+  });
+
+  // ---------------- 管理者：サイト設定 ----------------
+  function renderSiteEditor(){
+    $('kinkLabelInput').value = siteConfig.kinkLabel;
+    $('kinkCharsInput').value = siteConfig.kinkCharsPerPoint;
+    $('kinkMaxInput').value = siteConfig.kinkMaxPoints;
+    $('hashtagsInput').value = siteConfig.hashtags;
+    $('tweetTemplateInput').value = siteConfig.tweetTemplate;
+  }
+  $('saveSiteBtn').addEventListener('click', async ()=>{
+    const updated = {
+      kinkLabel: $('kinkLabelInput').value.trim() || DEFAULT_SITE.kinkLabel,
+      kinkCharsPerPoint: Math.max(1, Number($('kinkCharsInput').value) || DEFAULT_SITE.kinkCharsPerPoint),
+      kinkMaxPoints: Math.max(0, Number($('kinkMaxInput').value) || 0),
+      hashtags: $('hashtagsInput').value.trim(),
+      tweetTemplate: $('tweetTemplateInput').value.trim() || DEFAULT_SITE.tweetTemplate,
+    };
+    try{
+      await db.collection('app_config').doc('site').set(updated);
+      siteConfig = updated;
+      MAX_SCORE = computeQuestionsMax(activeQuestions) + (Number(siteConfig.kinkMaxPoints)||0);
+      showToast('siteToast','保存しました。', true);
+    }catch(e){ showToast('siteToast','保存に失敗しました', false); }
+  });
+  $('resetSiteBtn').addEventListener('click', async ()=>{
+    if(!confirm('サイト設定を初期状態に戻しますか?')) return;
+    siteConfig = cloneObj(DEFAULT_SITE);
+    try{ await db.collection('app_config').doc('site').set(siteConfig); }catch(e){}
+    MAX_SCORE = computeQuestionsMax(activeQuestions) + (Number(siteConfig.kinkMaxPoints)||0);
+    renderSiteEditor();
+    showToast('siteToast','初期状態に戻しました。', true);
+  });
+
+  // ---------------- 管理タブ切替 ----------------
+  document.querySelectorAll('.tab-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+      btn.classList.add('active');
+      $('panel-'+btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  // ---------------- 起動 ----------------
+  async function init(){
+    await loadConfigs();
+    const params = new URLSearchParams(location.search);
+    if(params.get('key') === ADMIN_TOKEN){
+      showScreen('admin');
+      editQuestions = cloneObj(activeQuestions);
+      editResults = cloneObj(resultBands);
+      renderEditor();
+      renderResultEditor();
+      renderSiteEditor();
+      loadAdminResponses();
+    } else {
+      showScreen('intro');
+    }
+  }
+  init();
+
+})();
+</script>
+</body>
+</html>
